@@ -97,8 +97,8 @@ def check_entry(row, is_btc: bool, btc_regime_val: str) -> str | None:
     price = row["close"]
     momentum_ok_long = row["momentum_4h"] > 0
     momentum_ok_short = row["momentum_4h"] < 0
-    cmf_ok_long = row["cmf_4h"] > 0
-    cmf_ok_short = row["cmf_4h"] < 0
+    cmf_ok_long = row["cmf_4h"] > config.ENTRY_CMF_THRESHOLD
+    cmf_ok_short = row["cmf_4h"] < -config.ENTRY_CMF_THRESHOLD
     trend_ok_long = price > row["ema200_daily"]
     trend_ok_short = price < row["ema200_daily"]
 
@@ -155,14 +155,14 @@ def simulate_trades(df: pd.DataFrame, symbol: str, is_btc: bool) -> pd.DataFrame
                     exit_price, exit_reason = position["stop"], "STOP_LOSS"
                 elif row["high"] >= position["target"]:
                     exit_price, exit_reason = position["target"], "TAKE_PROFIT"
-                elif row["cmf_4h"] < 0:
+                elif row["cmf_4h"] < -config.EXIT_SIGNAL_FLIP_BUFFER:
                     exit_price, exit_reason = row["close"], "SIGNAL_FLIP"
             else:  # SHORT
                 if row["high"] >= position["stop"]:
                     exit_price, exit_reason = position["stop"], "STOP_LOSS"
                 elif row["low"] <= position["target"]:
                     exit_price, exit_reason = position["target"], "TAKE_PROFIT"
-                elif row["cmf_4h"] > 0:
+                elif row["cmf_4h"] > config.EXIT_SIGNAL_FLIP_BUFFER:
                     exit_price, exit_reason = row["close"], "SIGNAL_FLIP"
 
             if exit_price is not None:
