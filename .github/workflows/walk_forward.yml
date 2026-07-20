@@ -1,0 +1,48 @@
+# walk_forward.yml
+name: Run Walk-Forward Optimization
+
+on:
+  workflow_dispatch:   # دکمهٔ اجرای دستی در تب Actions
+  push:
+    paths:
+      - "config.py"
+      - "indicators.py"
+      - "data_fetcher.py"
+      - "backtest.py"
+      - "walk_forward.py"
+      - "requirements.txt"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: walk-forward-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  walk-forward:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45   # Walk-Forward چند برابر بک‌تست ساده طول می‌کشد (چون گرید پارامتر جستجو می‌شود)
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run walk-forward optimization
+        run: python walk_forward.py
+
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add results/
+          git diff --cached --quiet || git commit -m "Update walk-forward results [automated]"
+          git pull --rebase origin ${{ github.ref_name }}
+          git push
