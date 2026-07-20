@@ -43,10 +43,10 @@ PARAM_GRID = {
     "EXIT_SIGNAL_FLIP_BUFFER": [0.0, 0.02, 0.05],
 }
 
-TRAIN_MONTHS = 6
-TEST_MONTHS = 2
+TRAIN_MONTHS = 4    # قبلاً ۶ بود - چون عمق واقعی دیتا (حتی با fallback Yahoo) حداکثر ~۲ سال است،
+TEST_MONTHS = 1      # پنجره‌های کوچک‌تر یعنی تعداد پنجرهٔ بیشتر و نتیجهٔ آماری قابل‌اعتمادتر
 MIN_TRAIN_BARS = 100
-MIN_TEST_BARS = 20
+MIN_TEST_BARS = 15
 
 
 def generate_windows(start: str, end: str | None):
@@ -148,9 +148,13 @@ def build_summary(details_df: pd.DataFrame) -> pd.DataFrame:
         else:
             weighted_wr = None
 
-        # profit_factor گاهی رشتهٔ "inf" است (وقتی هیچ ضرری رخ نداده) - برای میانگین‌گیری عددی می‌کنیم
+        # profit_factor گاهی رشتهٔ "inf" است (وقتی هیچ ضرری رخ نداده - معمولاً به‌خاطر تعداد کم معامله).
+        # چنین مقادیری را از میانگین‌گیری کنار می‌گذاریم چون یک عدد بی‌نهایت میانگین کل را بی‌معنی می‌کند؛
+        # تعداد این پنجره‌های "بدون ضرر" را جدا گزارش می‌کنیم.
         test_pf_numeric = pd.to_numeric(g["test_profit_factor"], errors="coerce")
-        avg_test_pf = test_pf_numeric.mean()
+        num_inf_windows = int(np.isinf(test_pf_numeric).sum())
+        test_pf_numeric_finite = test_pf_numeric.replace([np.inf, -np.inf], np.nan)
+        avg_test_pf = test_pf_numeric_finite.mean()
         avg_train_pf = g["train_profit_factor"].mean()
 
         # ترکیب بازده‌های Out-of-Sample به‌صورت متوالی (compounding سادهٔ فرضی)
@@ -171,6 +175,7 @@ def build_summary(details_df: pd.DataFrame) -> pd.DataFrame:
             "weighted_test_win_rate_pct": round(weighted_wr, 2) if weighted_wr is not None else None,
             "avg_train_profit_factor": round(avg_train_pf, 3) if pd.notna(avg_train_pf) else None,
             "avg_test_profit_factor": round(avg_test_pf, 3) if pd.notna(avg_test_pf) else None,
+            "num_test_windows_with_zero_losses": num_inf_windows,
             "overfit_gap_train_minus_test": overfit_gap,
             "combined_out_of_sample_return_pct": round(combined_return_pct, 2),
         })
@@ -239,6 +244,16 @@ def main():
     print("\n=== خلاصهٔ Out-of-Sample (Walk-Forward) ===")
     print(summary_df.to_string(index=False))
     print(f"\nجزئیات کامل هر پنجره در: {details_path}")
+
+    min_windows = summary_df["num_windows"].min()
+    if min_windows < 6:
+        print(
+            f"\n⚠️ هشدار: کمترین تعداد پنجره برای یک نماد فقط {min_windows} است. "
+            "برای نتیجه‌گیری آماری قابل‌اعتماد از Walk-Forward معمولاً حداقل ۶-۱۰ پنجره لازم است. "
+            "اگر این عدد کم است، احتمالاً عمق تاریخی دیتای دریافتی محدود بوده - خروجی ترمینال بالا "
+            "(بخش [CoinEx]/[Yahoo]) را چک کنید تا ببینید هر نماد واقعاً از چه تاریخی پوشش داده شده."
+        )
+
     print(
         "\nنکته: اگر avg_train_profit_factor به‌طور قابل‌توجه بالاتر از avg_test_profit_factor باشد "
         "(overfit_gap_train_minus_test بزرگ و مثبت)، یعنی پارامترها روی Train بیش‌برازش (Overfit) شده‌اند "
