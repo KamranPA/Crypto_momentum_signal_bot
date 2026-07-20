@@ -244,7 +244,25 @@ def summarize(trades_df: pd.DataFrame, symbol: str) -> dict:
     }
 
 
-def main():
+def diagnose_exit_reasons(trades_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """
+    شکست معاملات بر اساس دلیل خروج (STOP_LOSS / TAKE_PROFIT / SIGNAL_FLIP)
+    تا مشخص شود مشکل اصلی کجاست: حد ضرر خیلی تنگ؟ خروج زودهنگام با برگشت CMF؟
+    """
+    if trades_df.empty:
+        return pd.DataFrame()
+
+    grouped = trades_df.groupby("exit_reason").agg(
+        count=("pnl_pct_net", "count"),
+        avg_pnl_pct_net=("pnl_pct_net", "mean"),
+        win_rate_pct=("pnl_pct_net", lambda s: round((s > 0).mean() * 100, 2)),
+    ).reset_index()
+    grouped["symbol"] = symbol
+    grouped["pct_of_trades"] = round(grouped["count"] / len(trades_df) * 100, 1)
+    return grouped[["symbol", "exit_reason", "count", "pct_of_trades", "win_rate_pct", "avg_pnl_pct_net"]]
+
+
+
     os.makedirs(RESULTS_DIR, exist_ok=True)
     print("=== مرحلهٔ ۱: بک‌تست ساده ===\n")
 
@@ -256,6 +274,7 @@ def main():
     btc_data["btc_regime"] = compute_btc_regime_series(btc_data)
 
     all_summaries = []
+    all_diagnostics = []
 
     for symbol in config.SYMBOLS:
         print(f"\nدر حال پردازش {symbol} ...")
@@ -284,9 +303,20 @@ def main():
         print(f"  ✅ {summary['num_trades']} معامله | Win Rate: {summary['win_rate_pct']}% | "
               f"Profit Factor: {summary['profit_factor']} | Max DD: {summary['max_drawdown_pct']}%")
 
+        diag = diagnose_exit_reasons(trades_df, symbol)
+        if not diag.empty:
+            all_diagnostics.append(diag)
+
     summary_df = pd.DataFrame(all_summaries)
     summary_path = os.path.join(RESULTS_DIR, "summary.csv")
     summary_df.to_csv(summary_path, index=False, encoding="utf-8-sig")
+
+    if all_diagnostics:
+        diagnostics_df = pd.concat(all_diagnostics, ignore_index=True)
+        diagnostics_path = os.path.join(RESULTS_DIR, "diagnostics.csv")
+        diagnostics_df.to_csv(diagnostics_path, index=False, encoding="utf-8-sig")
+        print("\n=== تشخیص دلیل خروج معاملات (برای فهمیدن نقطهٔ ضعف) ===")
+        print(diagnostics_df.to_string(index=False))
 
     print("\n=== خلاصهٔ نهایی ===")
     print(summary_df.to_string(index=False))
