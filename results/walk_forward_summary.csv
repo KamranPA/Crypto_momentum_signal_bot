@@ -1,6 +1,6 @@
 ﻿symbol,num_windows,combined_test_trades,weighted_test_win_rate_pct,avg_train_profit_factor,avg_test_profit_factor,overfit_gap_train_minus_test,combined_out_of_sample_return_pct
-BNB/USDT,2,20,40.0,1.331,1.52,-0.189,8.6
-BTC/USDT,2,28,35.71,0.235,0.93,-0.695,-1.25
-ETH/USDT,2,27,44.45,0.188,1.125,-0.937,4.33
-SOL/USDT,2,25,32.0,0.153,1.055,-0.902,-12.09
-XRP/USDT,2,33,33.34,0.461,0.92,-0.458,-8.45
+BNB/USDT,11,199,34.67,0.813,0.793,0.02,-60.46
+BTC/USDT,11,209,34.93,0.789,0.846,-0.058,-47.43
+ETH/USDT,11,189,35.98,1.019,1.043,-0.024,-38.42
+SOL/USDT,11,177,36.72,0.972,0.976,-0.004,-30.11
+XRP/USDT,11,205,40.98,1.053,1.139,-0.086,0.97
