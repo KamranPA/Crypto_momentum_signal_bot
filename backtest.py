@@ -262,6 +262,7 @@ def diagnose_exit_reasons(trades_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     return grouped[["symbol", "exit_reason", "count", "pct_of_trades", "win_rate_pct", "avg_pnl_pct_net"]]
 
 
+def main():
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     print("=== مرحلهٔ ۱: بک‌تست ساده ===\n")
