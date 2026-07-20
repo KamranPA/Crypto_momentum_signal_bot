@@ -1,0 +1,41 @@
+# backtest.yml
+name: Run Crypto Backtest
+
+on:
+  workflow_dispatch:   # دکمهٔ اجرای دستی در تب Actions
+  push:
+    paths:
+      - "config.py"
+      - "indicators.py"
+      - "data_fetcher.py"
+      - "backtest.py"
+      - "requirements.txt"
+
+permissions:
+  contents: write   # لازم است تا workflow بتواند نتایج را دوباره به ریپو کامیت کند
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backtest
+        run: python backtest.py
+
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add results/
+          git diff --cached --quiet || git commit -m "Update backtest results [automated]"
+          git push
