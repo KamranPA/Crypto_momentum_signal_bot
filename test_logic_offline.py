@@ -1,3 +1,4 @@
+# test_logic_offline.py
 # -*- coding: utf-8 -*-
 """
 تست آفلاین منطق بک‌تست با دیتای مصنوعی تصادفی (Random Walk).
