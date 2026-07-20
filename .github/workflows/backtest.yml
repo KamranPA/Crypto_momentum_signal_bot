@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write   # لازم است تا workflow بتواند نتایج را دوباره به ریپو کامیت کند
 
+concurrency:
+  group: backtest-${{ github.ref }}
+  cancel-in-progress: false   # اجراهای هم‌زمان صف می‌شوند، نه اینکه هم‌زمان و ناهماهنگ push کنند
+
 jobs:
   backtest:
     runs-on: ubuntu-latest
@@ -38,4 +42,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add results/
           git diff --cached --quiet || git commit -m "Update backtest results [automated]"
+          git pull --rebase origin ${{ github.ref_name }}
           git push
