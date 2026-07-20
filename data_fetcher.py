@@ -119,10 +119,24 @@ def fetch_yahoo_4h(yahoo_ticker: str) -> pd.DataFrame:
     return resampled
 
 
+def _has_sufficient_coverage(df: pd.DataFrame, start: str, min_bars: int, coverage_tolerance_days: int = 60) -> bool:
+    """
+    چک واقعی کافی‌بودن دیتا: هم تعداد کندل کافی باشد، هم واقعاً از نزدیکی start شروع شده باشد.
+    قبلاً فقط تعداد کندل چک می‌شد که باگ داشت: اگر صرافی فقط ۶۰۰ کندل اخیر (نه از ابتدای بازه) برگرداند
+    ولی این عدد از حداقل لازم بیشتر بود، به‌اشتباه "کافی" تشخیص داده می‌شد در حالی که عمق تاریخی واقعی
+    خیلی کمتر از بازهٔ درخواستی بود.
+    """
+    if df.empty or len(df) < min_bars:
+        return False
+    start_ts = pd.Timestamp(start, tz="utc")
+    earliest = df.index.min()
+    return earliest <= start_ts + pd.Timedelta(days=coverage_tolerance_days)
+
+
 def get_daily_data(symbol: str, yahoo_ticker: str, start: str, end: str, min_bars_required: int) -> tuple[pd.DataFrame, str]:
     """
     دیتای روزانه را برمی‌گرداند + منبعی که استفاده شد ('coinex' یا 'yahoo').
-    اول CoinEx امتحان می‌شود؛ اگر کافی نبود، Yahoo.
+    اول CoinEx امتحان می‌شود؛ اگر کافی نبود (چه از نظر تعداد چه از نظر عمق تاریخی واقعی)، Yahoo.
     """
     since_ms = int(pd.Timestamp(start, tz="utc").timestamp() * 1000)
     df_coinex = pd.DataFrame()
@@ -131,19 +145,33 @@ def get_daily_data(symbol: str, yahoo_ticker: str, start: str, end: str, min_bar
     except Exception as e:
         print(f"[CoinEx][daily] خطا برای {symbol}: {e}")
 
-    if len(df_coinex) >= min_bars_required:
+    if _has_sufficient_coverage(df_coinex, start, min_bars_required):
+        print(f"  [{symbol}][daily] CoinEx کافی است: "
+              f"{df_coinex.index.min().date()} تا {df_coinex.index.max().date()} ({len(df_coinex)} کندل)")
         return df_coinex, "coinex"
 
-    print(f"[Fallback] دیتای روزانهٔ CoinEx برای {symbol} کافی نیست "
-          f"({len(df_coinex)} کندل، نیاز به {min_bars_required}) -> رفتن سراغ Yahoo Finance")
+    if not df_coinex.empty:
+        print(f"[Fallback] دیتای روزانهٔ CoinEx برای {symbol} پوشش کافی ندارد "
+              f"(فقط از {df_coinex.index.min().date()}, {len(df_coinex)} کندل - نه از {start}) "
+              f"-> رفتن سراغ Yahoo Finance")
+    else:
+        print(f"[Fallback] دیتای روزانهٔ CoinEx برای {symbol} خالی بود -> رفتن سراغ Yahoo Finance")
+
     df_yahoo = fetch_yahoo_daily(yahoo_ticker, start=start, end=end)
+    if not df_yahoo.empty:
+        print(f"  [{symbol}][daily] Yahoo: {df_yahoo.index.min().date()} تا {df_yahoo.index.max().date()} "
+              f"({len(df_yahoo)} کندل)")
     return df_yahoo, "yahoo"
 
 
 def get_4h_data(symbol: str, yahoo_ticker: str, start: str, min_bars_required: int) -> tuple[pd.DataFrame, str]:
     """
     دیتای 4 ساعته را برمی‌گرداند + منبعی که استفاده شد.
-    اول CoinEx امتحان می‌شود؛ اگر کافی نبود، Yahoo (resample از 1h).
+    اول CoinEx امتحان می‌شود؛ اگر کافی نبود (تعداد یا عمق تاریخی)، Yahoo (resample از 1h).
+
+    توجه مهم: Yahoo برای تایم‌فریم 1H (که پایهٔ resample به 4H است) حداکثر ~730 روز گذشته را می‌دهد.
+    یعنی حتی با fallback، عمق تاریخی 4H هرگز نمی‌تواند بیشتر از ~2 سال گذشته باشد -
+    این یک محدودیت واقعی Yahoo است، نه باگ.
     """
     since_ms = int(pd.Timestamp(start, tz="utc").timestamp() * 1000)
     df_coinex = pd.DataFrame()
@@ -152,10 +180,20 @@ def get_4h_data(symbol: str, yahoo_ticker: str, start: str, min_bars_required: i
     except Exception as e:
         print(f"[CoinEx][4h] خطا برای {symbol}: {e}")
 
-    if len(df_coinex) >= min_bars_required:
+    if _has_sufficient_coverage(df_coinex, start, min_bars_required):
+        print(f"  [{symbol}][4h] CoinEx کافی است: "
+              f"{df_coinex.index.min().date()} تا {df_coinex.index.max().date()} ({len(df_coinex)} کندل)")
         return df_coinex, "coinex"
 
-    print(f"[Fallback] دیتای 4Hی CoinEx برای {symbol} کافی نیست "
-          f"({len(df_coinex)} کندل، نیاز به {min_bars_required}) -> رفتن سراغ Yahoo Finance (resample از 1H)")
+    if not df_coinex.empty:
+        print(f"[Fallback] دیتای 4Hی CoinEx برای {symbol} پوشش کافی ندارد "
+              f"(فقط از {df_coinex.index.min().date()}, {len(df_coinex)} کندل - نه از {start}) "
+              f"-> رفتن سراغ Yahoo Finance (resample از 1H، حداکثر ~730 روز گذشته)")
+    else:
+        print(f"[Fallback] دیتای 4Hی CoinEx برای {symbol} خالی بود -> رفتن سراغ Yahoo Finance")
+
     df_yahoo = fetch_yahoo_4h(yahoo_ticker)
+    if not df_yahoo.empty:
+        print(f"  [{symbol}][4h] Yahoo: {df_yahoo.index.min().date()} تا {df_yahoo.index.max().date()} "
+              f"({len(df_yahoo)} کندل)")
     return df_yahoo, "yahoo"
