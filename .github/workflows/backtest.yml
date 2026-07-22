@@ -1,46 +1,47 @@
-# backtest.yml
-name: Run Crypto Backtest
+# نام فایل: backtest.yml
+# مسیر: .github/workflows/backtest.yml
+#
+# اجرای دستی از تب Actions ریپازیتوری (workflow_dispatch) -- دیتای تاریخی رو از
+# Yahoo Finance + CoinEx می‌گیره، بک‌تست رو اجرا می‌کنه، و نتیجه رو مستقیم در
+# پوشهٔ result/ کامیت می‌کنه تا نیازی به آپلود دستی جایی نباشه.
+#
+# نحوهٔ اجرا: تب Actions ریپو -> "Backtest" -> دکمهٔ "Run workflow"
+# نتیجه: چند دقیقه بعد، فایل‌های result/history_*.csv و result/backtest_summary.csv
+# مستقیم در ریپازیتوری قابل مشاهده‌ان (و در لاگ خودِ Action هم چاپ می‌شن).
+
+name: Backtest
 
 on:
-  workflow_dispatch:   # دکمهٔ اجرای دستی در تب Actions
-  push:
-    paths:
-      - "config.py"
-      - "indicators.py"
-      - "data_fetcher.py"
-      - "backtest.py"
-      - "requirements.txt"
+  workflow_dispatch: {}
 
 permissions:
-  contents: write   # لازم است تا workflow بتواند نتایج را دوباره به ریپو کامیت کند
-
-concurrency:
-  group: backtest-${{ github.ref }}
-  cancel-in-progress: false   # اجراهای هم‌زمان صف می‌شوند، نه اینکه هم‌زمان و ناهماهنگ push کنند
+  contents: write
 
 jobs:
-  backtest:
+  run-backtest:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run backtest
-        run: python backtest.py
+      - name: Fetch historical data (Yahoo Finance + CoinEx)
+        run: python fetch_historical_data.py
 
-      - name: Commit and push results
+      - name: Run backtest on all symbols
+        run: python run_all_backtests.py
+
+      - name: Commit results
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add results/
-          git diff --cached --quiet || git commit -m "Update backtest results [automated]"
-          git pull --rebase origin ${{ github.ref_name }}
+          git config user.name "backtest-bot"
+          git config user.email "backtest-bot@users.noreply.github.com"
+          git add result/
+          git diff --cached --quiet || git commit -m "backtest results [skip ci]"
           git push
