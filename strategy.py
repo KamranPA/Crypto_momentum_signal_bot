@@ -20,11 +20,11 @@ def funding_score(funding_rate: float, funding_hist: pd.Series) -> float:
     """
     if len(funding_hist) < 100:
         return 0.0
-    p05 = funding_hist.quantile(0.05)
-    p95 = funding_hist.quantile(0.95)
-    if funding_rate <= p05:
+    p15 = funding_hist.quantile(0.15)
+    p85 = funding_hist.quantile(0.85)
+    if funding_rate <= p15:
         return 1.0
-    if funding_rate >= p95:
+    if funding_rate >= p85:
         return -1.0
     return 0.0
 
@@ -34,18 +34,18 @@ def flow_score(buy_sell_ratio: float) -> float:
     buy_sell_ratio = volume_buy / volume_sell از GET /futures/market-ticker در CoinEx.
     جایگزین Open Interest (که fetchOpenInterestHistory برای CoinEx در ccxt پشتیبانی نمی‌شه).
     """
-    if buy_sell_ratio > 1.15:
+    if buy_sell_ratio > 1.08:
         return 1.0
-    if buy_sell_ratio < 0.87:
+    if buy_sell_ratio < 0.93:
         return -1.0
     return 0.0
 
 
 def ma50_score(price: float, ma50: float) -> float:
     ratio = price / ma50
-    if ratio < 0.85:
+    if ratio < 0.92:
         return 1.0
-    if ratio > 1.15:
+    if ratio > 1.08:
         return -1.0
     return 0.0
 
