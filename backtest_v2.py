@@ -25,10 +25,17 @@ def funding_score(funding_rate: float, funding_hist: pd.Series) -> float:
     return 0.0
 
 
-def flow_score(oi_change_pct: float) -> float:
-    if oi_change_pct > 5:
+def flow_score(buy_sell_ratio: float) -> float:
+    """
+    بجای Open Interest (که fetchOpenInterestHistory برای CoinEx در ccxt پشتیبانی نمی‌شه)،
+    از نسبت واقعی حجم خرید/فروش تیکر استفاده می‌کنیم -- مستقیماً از فیلدهای
+    volume_buy و volume_sell که خودِ CoinEx در GET /futures/market-ticker برمی‌گردونه.
+    buy_sell_ratio = volume_buy / volume_sell
+    این معیار از OI هم به مفهوم "تأیید جریان واقعی سفارش" نزدیک‌تره، چون جهت‌دار هست.
+    """
+    if buy_sell_ratio > 1.15:   # فشار خرید واقعی محسوس
         return 1.0
-    if oi_change_pct < -5:
+    if buy_sell_ratio < 0.87:  # فشار فروش واقعی محسوس (معکوس ۱.۱۵)
         return -1.0
     return 0.0
 
@@ -48,7 +55,7 @@ def volume_score(volume_24h_usd: float, min_volume_usd: float = 50_000_000) -> f
 
 def compute_signal(row: pd.Series, funding_hist: pd.Series):
     fs = funding_score(row["funding_rate"], funding_hist)
-    fl = flow_score(row["oi_change_pct"])
+    fl = flow_score(row["buy_sell_ratio"])
     ms = ma50_score(row["close"], row["ma50"])
     vs = volume_score(row["volume_24h_usd"])
 
@@ -79,7 +86,8 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 def run_backtest(df: pd.DataFrame, symbol: str, window_days: int = 30, n_windows: int = 22):
     """
     df باید شامل ستون‌های زیر باشه (تایم‌فریم ۴ ساعته):
-    timestamp, open, high, low, close, volume_24h_usd, funding_rate, oi_change_pct
+    timestamp, open, high, low, close, volume_24h_usd, funding_rate, buy_sell_ratio
+    (buy_sell_ratio = volume_buy / volume_sell از GET /futures/market-ticker در CoinEx)
     """
     df = df.copy()
     df["ma50"] = df["close"].rolling(50).mean()
@@ -147,12 +155,12 @@ def _make_synthetic_data(n_bars: int = 5000, seed: int = 42) -> pd.DataFrame:
     low = price * (1 - np.abs(rng.normal(0, 0.005, n_bars)))
     open_ = price * (1 + rng.normal(0, 0.002, n_bars))
     funding_rate = rng.normal(0.0001, 0.0003, n_bars)
-    oi_change_pct = rng.normal(0, 4, n_bars)
+    buy_sell_ratio = np.exp(rng.normal(0, 0.15, n_bars))  # حول ۱.۰ نوسان می‌کنه، مثل نسبت واقعی
     volume_24h_usd = rng.uniform(40_000_000, 200_000_000, n_bars)
     timestamp = pd.date_range("2023-01-01", periods=n_bars, freq="4h")
     return pd.DataFrame({
         "timestamp": timestamp, "open": open_, "high": high, "low": low, "close": price,
-        "volume_24h_usd": volume_24h_usd, "funding_rate": funding_rate, "oi_change_pct": oi_change_pct,
+        "volume_24h_usd": volume_24h_usd, "funding_rate": funding_rate, "buy_sell_ratio": buy_sell_ratio,
     })
 
 
