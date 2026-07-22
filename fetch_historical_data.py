@@ -44,7 +44,7 @@ def fetch_price_yfinance(yahoo_ticker: str) -> pd.DataFrame:
         "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum",
     }).dropna().reset_index()
 
-    df_4h["timestamp"] = pd.to_datetime(df_4h["timestamp"]).dt.tz_localize(None)
+    df_4h["timestamp"] = pd.to_datetime(df_4h["timestamp"]).dt.tz_localize(None).astype("datetime64[ns]")
     return df_4h
 
 
@@ -61,7 +61,7 @@ def fetch_full_funding_history(exchange, symbol: str, since_ms: int) -> pd.DataF
         time.sleep(exchange.rateLimit / 1000)
 
     fdf = pd.DataFrame(all_rows)
-    fdf["timestamp"] = pd.to_datetime(fdf["timestamp"], unit="ms").dt.tz_localize(None)
+    fdf["timestamp"] = pd.to_datetime(fdf["timestamp"], unit="ms").dt.tz_localize(None).astype("datetime64[ns]")
     return fdf[["timestamp", "fundingRate"]].rename(columns={"fundingRate": "funding_rate"})
 
 
