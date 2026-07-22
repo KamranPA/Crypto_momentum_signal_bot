@@ -1,199 +1,92 @@
-# data_fetcher.py
-# -*- coding: utf-8 -*-
-"""
-لایهٔ دریافت دیتا.
+# نام فایل: data_fetcher.py
+# مسیر: data_fetcher.py  (ریشهٔ ریپازیتوری)
+#
+# دریافت دیتای زنده از CoinEx برای محاسبهٔ سیگنال.
+# نیازی به API Key نیست چون همهٔ این داده‌ها عمومی هستن (endpoint های public).
+#
+# منابع دیتا:
+#   - OHLCV                -> ccxt یکپارچه: exchange.fetch_ohlcv (برای MA50 و ATR)
+#   - Funding Rate History -> ccxt یکپارچه: exchange.fetch_funding_rate_history
+#   - Buy/Sell Volume      -> فیلد خام CoinEx (volume_buy / volume_sell) که در
+#                              info خام fetch_tickers برمی‌گرده -- در ccxt یکپارچه
+#                              نیست، برای همین از دادهٔ raw استفاده می‌کنیم.
 
-منطق:
-1. همیشه اول تلاش می‌کنیم دیتا را از CoinEx (از طریق ccxt) بگیریم،
-   چون هدف نهایی معامله روی همین صرافی است و رفتار قیمتی/حجمی آن ممکن است
-   با صرافی‌های دیگر کمی فرق داشته باشد.
-2. اگر تعداد کندل‌های برگشتی از CoinEx کمتر از حداقل لازم برای بک‌تست بود
-   (چون CoinEx معمولاً تاریخچهٔ محدودی می‌دهد)، به‌صورت خودکار سراغ Yahoo Finance
-   می‌رویم تا عمق تاریخی کافی برای EMA200 روزانه و بک‌تست چندماهه داشته باشیم.
-3. دیتای Yahoo فقط برای *بک‌تست* استفاده می‌شود، نه برای اجرای زنده -
-   اجرای زنده و سیگنال‌دهی نهایی همیشه باید از CoinEx بخواند.
-
-نکته دربارهٔ Yahoo + تایم‌فریم 4 ساعته:
-Yahoo Finance تایم‌فریم 4h ندارد. حداکثر دقتی که برای بازه‌های طولانی می‌دهد 1h است
-(و آن‌هم فقط برای ~730 روز گذشته). بنابراین وقتی به Yahoo فallback می‌کنیم،
-دیتای 1h را می‌گیریم و با resample به 4H تبدیل می‌کنیم.
-"""
-import time
+import ccxt
 import pandas as pd
 
-try:
-    import ccxt
-except ImportError:
-    ccxt = None
 
-try:
-    import yfinance as yf
-except ImportError:
-    yf = None
+def get_exchange() -> ccxt.coinex:
+    return ccxt.coinex({"enableRateLimit": True, "options": {"defaultType": "swap"}})
 
 
-def _ohlcv_list_to_df(ohlcv: list) -> pd.DataFrame:
-    df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-    df = df.set_index("timestamp")
+def fetch_ohlcv_df(exchange: ccxt.coinex, symbol: str, timeframe: str = "4h", limit: int = 500) -> pd.DataFrame:
+    """symbol مثل 'BTC/USDT:USDT' (فرمت ccxt برای فیوچرز خطی)."""
+    raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
     return df
 
 
-def fetch_coinex_ohlcv(symbol: str, timeframe: str, since_ms: int = None, limit: int = 1000) -> pd.DataFrame:
+def fetch_funding_rate_history_series(exchange: ccxt.coinex, symbol: str, limit: int = 500) -> pd.Series:
+    raw = exchange.fetch_funding_rate_history(symbol, limit=limit)
+    rates = [r["fundingRate"] for r in raw if r.get("fundingRate") is not None]
+    return pd.Series(rates)
+
+
+def fetch_current_funding_rate(exchange: ccxt.coinex, symbol: str) -> float:
+    fr = exchange.fetch_funding_rate(symbol)
+    return float(fr["fundingRate"])
+
+
+def fetch_buy_sell_ratio_and_volume(exchange: ccxt.coinex, symbol: str) -> tuple[float, float]:
     """
-    دریافت کندل از CoinEx با صفحه‌بندی (چون هر درخواست ccxt معمولاً محدود به ~1000 کندل است).
-    اگر CoinEx برای این نماد/تایم‌فریم داده نداشته باشد، DataFrame خالی برمی‌گرداند.
+    برمی‌گردونه: (buy_sell_ratio, volume_24h_usd)
+    از فیلدهای خام CoinEx: volume_buy, volume_sell, value (ارزش دلاری ۲۴ ساعته)
+    که در ticker['info'] در دسترسن (چون در unified ccxt ticker نیستن).
     """
-    if ccxt is None:
-        raise RuntimeError("پکیج ccxt نصب نیست. اجرا کنید: pip install ccxt")
+    ticker = exchange.fetch_ticker(symbol)
+    info = ticker.get("info", {})
+    volume_buy = float(info.get("volume_buy", 0) or 0)
+    volume_sell = float(info.get("volume_sell", 0) or 0)
+    volume_24h_usd = float(info.get("value", 0) or 0)
 
-    exchange = ccxt.coinex({"enableRateLimit": True})
-    all_rows = []
-    fetch_since = since_ms
-
-    while True:
-        try:
-            batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=fetch_since, limit=limit)
-        except Exception as e:
-            print(f"[CoinEx] خطا در دریافت {symbol} {timeframe}: {e}")
-            break
-
-        if not batch:
-            break
-
-        all_rows.extend(batch)
-
-        if len(batch) < limit:
-            break
-
-        last_ts = batch[-1][0]
-        # جلوگیری از حلقهٔ بی‌نهایت اگر last_ts پیشرفت نکند
-        if fetch_since is not None and last_ts <= fetch_since:
-            break
-        fetch_since = last_ts + 1
-        time.sleep(exchange.rateLimit / 1000.0)
-
-    if not all_rows:
-        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-
-    df = _ohlcv_list_to_df(all_rows)
-    df = df[~df.index.duplicated(keep="first")].sort_index()
-    return df
-
-
-def fetch_yahoo_daily(yahoo_ticker: str, start: str, end: str = None) -> pd.DataFrame:
-    """دریافت دیتای روزانه از Yahoo Finance."""
-    if yf is None:
-        raise RuntimeError("پکیج yfinance نصب نیست. اجرا کنید: pip install yfinance")
-
-    df = yf.download(yahoo_ticker, start=start, end=end, interval="1d", progress=False, auto_adjust=False)
-    if df.empty:
-        return df
-    df = df.rename(columns=str.lower)
-    df.index = pd.to_datetime(df.index, utc=True)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0].lower() for c in df.columns]
-    return df[["open", "high", "low", "close", "volume"]]
-
-
-def fetch_yahoo_4h(yahoo_ticker: str) -> pd.DataFrame:
-    """
-    دریافت دیتای 1H از Yahoo (حداکثر ~730 روز گذشته) و resample به 4H.
-    """
-    if yf is None:
-        raise RuntimeError("پکیج yfinance نصب نیست. اجرا کنید: pip install yfinance")
-
-    df = yf.download(yahoo_ticker, period="730d", interval="1h", progress=False, auto_adjust=False)
-    if df.empty:
-        return df
-    df = df.rename(columns=str.lower)
-    df.index = pd.to_datetime(df.index, utc=True)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0].lower() for c in df.columns]
-    df = df[["open", "high", "low", "close", "volume"]]
-
-    resampled = df.resample("4h", origin="epoch").agg(
-        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
-    )
-    resampled = resampled.dropna(subset=["open", "high", "low", "close"])
-    return resampled
-
-
-def _has_sufficient_coverage(df: pd.DataFrame, start: str, min_bars: int, coverage_tolerance_days: int = 60) -> bool:
-    """
-    چک واقعی کافی‌بودن دیتا: هم تعداد کندل کافی باشد، هم واقعاً از نزدیکی start شروع شده باشد.
-    قبلاً فقط تعداد کندل چک می‌شد که باگ داشت: اگر صرافی فقط ۶۰۰ کندل اخیر (نه از ابتدای بازه) برگرداند
-    ولی این عدد از حداقل لازم بیشتر بود، به‌اشتباه "کافی" تشخیص داده می‌شد در حالی که عمق تاریخی واقعی
-    خیلی کمتر از بازهٔ درخواستی بود.
-    """
-    if df.empty or len(df) < min_bars:
-        return False
-    start_ts = pd.Timestamp(start, tz="utc")
-    earliest = df.index.min()
-    return earliest <= start_ts + pd.Timedelta(days=coverage_tolerance_days)
-
-
-def get_daily_data(symbol: str, yahoo_ticker: str, start: str, end: str, min_bars_required: int) -> tuple[pd.DataFrame, str]:
-    """
-    دیتای روزانه را برمی‌گرداند + منبعی که استفاده شد ('coinex' یا 'yahoo').
-    اول CoinEx امتحان می‌شود؛ اگر کافی نبود (چه از نظر تعداد چه از نظر عمق تاریخی واقعی)، Yahoo.
-    """
-    since_ms = int(pd.Timestamp(start, tz="utc").timestamp() * 1000)
-    df_coinex = pd.DataFrame()
-    try:
-        df_coinex = fetch_coinex_ohlcv(symbol, "1d", since_ms=since_ms)
-    except Exception as e:
-        print(f"[CoinEx][daily] خطا برای {symbol}: {e}")
-
-    if _has_sufficient_coverage(df_coinex, start, min_bars_required):
-        print(f"  [{symbol}][daily] CoinEx کافی است: "
-              f"{df_coinex.index.min().date()} تا {df_coinex.index.max().date()} ({len(df_coinex)} کندل)")
-        return df_coinex, "coinex"
-
-    if not df_coinex.empty:
-        print(f"[Fallback] دیتای روزانهٔ CoinEx برای {symbol} پوشش کافی ندارد "
-              f"(فقط از {df_coinex.index.min().date()}, {len(df_coinex)} کندل - نه از {start}) "
-              f"-> رفتن سراغ Yahoo Finance")
+    if volume_sell == 0:
+        buy_sell_ratio = 1.0  # حالت خنثی وقتی دیتا در دسترس نیست
     else:
-        print(f"[Fallback] دیتای روزانهٔ CoinEx برای {symbol} خالی بود -> رفتن سراغ Yahoo Finance")
+        buy_sell_ratio = volume_buy / volume_sell
 
-    df_yahoo = fetch_yahoo_daily(yahoo_ticker, start=start, end=end)
-    if not df_yahoo.empty:
-        print(f"  [{symbol}][daily] Yahoo: {df_yahoo.index.min().date()} تا {df_yahoo.index.max().date()} "
-              f"({len(df_yahoo)} کندل)")
-    return df_yahoo, "yahoo"
+    return buy_sell_ratio, volume_24h_usd
 
 
-def get_4h_data(symbol: str, yahoo_ticker: str, start: str, min_bars_required: int) -> tuple[pd.DataFrame, str]:
+def build_signal_row(exchange: ccxt.coinex, symbol: str) -> tuple[dict, pd.Series]:
     """
-    دیتای 4 ساعته را برمی‌گرداند + منبعی که استفاده شد.
-    اول CoinEx امتحان می‌شود؛ اگر کافی نبود (تعداد یا عمق تاریخی)، Yahoo (resample از 1h).
-
-    توجه مهم: Yahoo برای تایم‌فریم 1H (که پایهٔ resample به 4H است) حداکثر ~730 روز گذشته را می‌دهد.
-    یعنی حتی با fallback، عمق تاریخی 4H هرگز نمی‌تواند بیشتر از ~2 سال گذشته باشد -
-    این یک محدودیت واقعی Yahoo است، نه باگ.
+    یک اسنپ‌شات کامل برای محاسبهٔ سیگنال یک نماد می‌سازه.
+    خروجی: (row_dict برای strategy.compute_signal, funding_hist برای صدک‌گیری)
     """
-    since_ms = int(pd.Timestamp(start, tz="utc").timestamp() * 1000)
-    df_coinex = pd.DataFrame()
-    try:
-        df_coinex = fetch_coinex_ohlcv(symbol, "4h", since_ms=since_ms)
-    except Exception as e:
-        print(f"[CoinEx][4h] خطا برای {symbol}: {e}")
+    df = fetch_ohlcv_df(exchange, symbol)
+    df["ma50"] = df["close"].rolling(50).mean()
+    last = df.iloc[-1]
 
-    if _has_sufficient_coverage(df_coinex, start, min_bars_required):
-        print(f"  [{symbol}][4h] CoinEx کافی است: "
-              f"{df_coinex.index.min().date()} تا {df_coinex.index.max().date()} ({len(df_coinex)} کندل)")
-        return df_coinex, "coinex"
+    funding_hist = fetch_funding_rate_history_series(exchange, symbol)
+    current_funding = fetch_current_funding_rate(exchange, symbol)
+    buy_sell_ratio, volume_24h_usd = fetch_buy_sell_ratio_and_volume(exchange, symbol)
 
-    if not df_coinex.empty:
-        print(f"[Fallback] دیتای 4Hی CoinEx برای {symbol} پوشش کافی ندارد "
-              f"(فقط از {df_coinex.index.min().date()}, {len(df_coinex)} کندل - نه از {start}) "
-              f"-> رفتن سراغ Yahoo Finance (resample از 1H، حداکثر ~730 روز گذشته)")
-    else:
-        print(f"[Fallback] دیتای 4Hی CoinEx برای {symbol} خالی بود -> رفتن سراغ Yahoo Finance")
+    row = {
+        "close": float(last["close"]),
+        "ma50": float(last["ma50"]),
+        "funding_rate": current_funding,
+        "buy_sell_ratio": buy_sell_ratio,
+        "volume_24h_usd": volume_24h_usd,
+        "atr14": float(_atr_last(df)),
+    }
+    return row, funding_hist
 
-    df_yahoo = fetch_yahoo_4h(yahoo_ticker)
-    if not df_yahoo.empty:
-        print(f"  [{symbol}][4h] Yahoo: {df_yahoo.index.min().date()} تا {df_yahoo.index.max().date()} "
-              f"({len(df_yahoo)} کندل)")
-    return df_yahoo, "yahoo"
+
+def _atr_last(df: pd.DataFrame, period: int = 14) -> float:
+    high, low, close = df["high"], df["low"], df["close"]
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(period).mean().iloc[-1]
