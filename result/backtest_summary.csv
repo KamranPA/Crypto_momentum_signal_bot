@@ -1,5 +1,5 @@
-symbol,combined_oos_return_pct,mean_window_return_pct,pct_positive_windows,total_trades
-BNB,-3.58,0.18,23.8,19
-BTC,-8.82,-0.24,14.3,13
-ETH,1.95,0.63,38.1,29
-SOL,-42.06,-1.62,42.9,45
+symbol,combined_oos_return_pct,mean_window_return_pct,pct_positive_windows,total_trades,trade_win_rate_pct,avg_pnl_per_trade_pct,win_loss_ratio
+BNB,-3.38,0.19,23.8,19,31.6,0.088,2.23
+BTC,-3.86,0.02,14.3,12,33.3,-0.111,1.93
+ETH,2.92,0.89,38.1,29,37.9,0.447,1.84
+SOL,-34.82,-1.15,42.9,44,29.5,-0.705,1.94
