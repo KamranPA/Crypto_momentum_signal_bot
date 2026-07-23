@@ -54,6 +54,7 @@ def run_backtest_2factor(df, symbol, window_days=30, n_windows=22):
 
     bars_per_window = window_days * 6
     results = []
+    all_trades = []  # همهٔ معاملات کل نماد (سطح تک‌معامله، نه سطح پنجره)
 
     for w in range(n_windows):
         start = w * bars_per_window
@@ -83,6 +84,7 @@ def run_backtest_2factor(df, symbol, window_days=30, n_windows=22):
                     exit_price = position["stop"] if hit_stop else position["target"]
                     pnl_pct = (exit_price / position["entry"] - 1) * (1 if position["side"] == "BUY" else -1)
                     trades.append(pnl_pct)
+                    all_trades.append(pnl_pct)
                     position = None
 
         window_return = float(np.prod([1 + t for t in trades]) - 1) if trades else 0.0
@@ -95,12 +97,28 @@ def run_backtest_2factor(df, symbol, window_days=30, n_windows=22):
     combined_return = float(np.prod([1 + r / 100 for r in results_df["window_return_pct"]]) - 1) * 100
     pct_positive = float((results_df["window_return_pct"] > 0).mean() * 100)
 
+    # --- آمار سطح تک‌معامله (گزینهٔ ۲: تصویر دقیق‌تر از win rate) ---
+    n_trades_total = len(all_trades)
+    wins = [t for t in all_trades if t > 0]
+    losses = [t for t in all_trades if t <= 0]
+    trade_win_rate = (len(wins) / n_trades_total * 100) if n_trades_total else None
+    avg_win_pct = (float(np.mean(wins)) * 100) if wins else None
+    avg_loss_pct = (float(np.mean(losses)) * 100) if losses else None
+    avg_pnl_per_trade_pct = (float(np.mean(all_trades)) * 100) if all_trades else None
+    # نسبت سود به زیان: میانگین برد تقسیم بر قدرمطلق میانگین باخت
+    win_loss_ratio = (avg_win_pct / abs(avg_loss_pct)) if (avg_win_pct and avg_loss_pct) else None
+
     return {
         "symbol": symbol,
         "combined_oos_return_pct": combined_return,
         "mean_window_return_pct": float(results_df["window_return_pct"].mean()),
         "pct_positive_windows": pct_positive,
         "total_trades": int(results_df["n_trades"].sum()),
+        "trade_win_rate_pct": trade_win_rate,
+        "avg_pnl_per_trade_pct": avg_pnl_per_trade_pct,
+        "avg_win_pct": avg_win_pct,
+        "avg_loss_pct": avg_loss_pct,
+        "win_loss_ratio": win_loss_ratio,
         "windows": results_df,
     }
 
@@ -127,6 +145,12 @@ def main():
         print(f"  میانگین بازده هر پنجره: {result['mean_window_return_pct']:.2f}%")
         print(f"  درصد پنجره‌های مثبت: {result['pct_positive_windows']:.1f}%")
         print(f"  تعداد کل معاملات: {result['total_trades']}")
+        if result["trade_win_rate_pct"] is not None:
+            print(f"  نرخ برد تک‌معامله: {result['trade_win_rate_pct']:.1f}%")
+            print(f"  میانگین سود/زیان هر معامله: {result['avg_pnl_per_trade_pct']:.2f}%")
+            print(f"  میانگین برد: {result['avg_win_pct']:.2f}% | میانگین باخت: {result['avg_loss_pct']:.2f}%")
+            if result["win_loss_ratio"] is not None:
+                print(f"  نسبت سود به زیان: {result['win_loss_ratio']:.2f}")
 
         summary_rows.append({
             "symbol": symbol,
@@ -134,6 +158,9 @@ def main():
             "mean_window_return_pct": round(result["mean_window_return_pct"], 2),
             "pct_positive_windows": round(result["pct_positive_windows"], 1),
             "total_trades": result["total_trades"],
+            "trade_win_rate_pct": round(result["trade_win_rate_pct"], 1) if result["trade_win_rate_pct"] is not None else None,
+            "avg_pnl_per_trade_pct": round(result["avg_pnl_per_trade_pct"], 3) if result["avg_pnl_per_trade_pct"] is not None else None,
+            "win_loss_ratio": round(result["win_loss_ratio"], 2) if result["win_loss_ratio"] is not None else None,
         })
 
     summary_df = pd.DataFrame(summary_rows)
